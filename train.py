@@ -42,25 +42,20 @@ class Trainer:
         data_dir = Path(cfg_data['data_dir'])
 
         self.dataset = ProprioDataset(
-            data_dir / cfg_data["dataset_name"]
+            data_dir / cfg_data["dataset_name"], img_tfs, label_tfs
         )
+
+        sanity_dataset = torch.utils.data.Subset(self.dataset,list(range(40)))
 
         train_dataset, test_dataset = random_split(
-            self.dataset,
-            (round(0.8 * len(self.dataset)), round(0.2 * len(self.dataset))),
+            sanity_dataset,
+            (round(0.8 * len(sanity_dataset)), round(0.2 * len(sanity_dataset))),
         )
 
-        train_data = np.concatenate([np.array(x) for y, x in train_dataset], axis=0)
-        mean = np.mean(data, axis=(0,1,2))
-        std = np.std(data, axis=(0,1,2))
-
-        train_data = np.concatenate([np.array(x) for y, x in train_dataset], axis=0)
-        mean = np.mean(data, axis=(0,1,2))
-        std = np.std(data, axis=(0,1,2))
 
         cfg_train = cfg["train"]
         self.device = torch.device(cfg_train["device"])
-        self.model = ProprioNet()
+        self.model = ProprioNet(tuple(cfg_data['image_size']), cfg_data['state_dim'])
         self.model.to(self.device)
         self.epochs = cfg_train["epochs"]
 
@@ -73,7 +68,10 @@ class Trainer:
         self.optimizer = optim.SGD(
             self.model.parameters(), lr=cfg_train["lr"], momentum=0.9
         )
-        self.criterion = nn.CrossEntropyLoss()
+        self.criterion = lambda x, label: torch.sum(
+                    torch.abs(x - label) +
+                    torch.pow(x - label,2)
+                )
 
         # logging
         log_folder = datetime.datetime.now().strftime("log_%m-%d-%Y_%H-%M-%S")
@@ -114,7 +112,7 @@ class Trainer:
             if batch % 2 == 0:
                 loss, current = loss.item(), batch * len(inputs)
                 logging.info(f"loss: {loss:>7f}  [{current:>5d}/{size:>5d}]")
-                log_value('train_loss')
+                log_value('train_loss',loss)
 
     def test(self):
         num_batches = len(self.testloader)
@@ -133,12 +131,16 @@ class Trainer:
         log_value('test_loss', test_loss)
 
     def train_test(self):
-        for i in range(self.epochs):
+        i = 0
+        while(True):
+            if i >= self.epochs and self.epochs != -1: # -1 means keep training without stop
+                break
             logging.info(f"Epoch {i+1}\n-------------------------------")
             self.train()
             self.test()
             if i % 10:
                 self.checkpoint()
+            i+=1
 
     def checkpoint(self, name=None):
         if name is None:

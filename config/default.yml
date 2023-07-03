@@ -2,11 +2,11 @@ seed: 512
 data:
     data_dir: './data' 
     dataset_name: 'dataset_06-29-2023_18-32-54'
-    state_dim: 16
+    state_dim: 36
     image_size: [256,256]  
   
 train:
     device: 'cuda'
-    epochs: 50
+    epochs: -1
     lr: 0.0001
-    batch_size: 10
+    batch_size: 5
