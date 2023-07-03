@@ -13,30 +13,98 @@ import os
 import numpy as np
 import cv2
 
+
 import open3d as o3d
 
-def visualize_line(points, line_points):
-    # Create a PointCloud object
-    pcd = o3d.geometry.PointCloud()
+np.random.seed(10)
 
-    # Create LineSet object
-    line_set = o3d.geometry.LineSet()
+class PlyToState(object):
+    ransac_n: int = 3
+    distance_threshold: int = 5
+    ransac_iter: int = 1000
+    def __init__(self, state_dim):
+        self.state_dim = state_dim
 
-    # Add points to the point cloud
-    pcd.points = o3d.utility.Vector3dVector(points)
-    pcd.paint_uniform_color([1, 0, 0])  # Paint inliers red
+    def __call__(self, sample: o3d.geometry.PointCloud):
 
+        # Fit a plane to the point cloud using RANSAC
+        plane_model, inliers = sample.segment_plane(distance_threshold=self.distance_threshold,
+                                                ransac_n=self.ransac_n,
+                                                num_iterations=self.ransac_iter)
+
+        # Extract inliers and outliers
+        inlier_cloud = sample.select_by_index(inliers)
+        outlier_cloud = sample.select_by_index(inliers, invert=True)
+
+        # Proj all points to plane
+        pts_npy = np.asarray(inlier_cloud.points)
+
+        plane_model_unit_v = plane_model[:3] / np.linalg.norm(plane_model)
+        plane_pt = np.zeros(3)
+        plane_pt[2] = -plane_model[3] / plane_model[2]
+        points_v = pts_npy - plane_pt
+        proj_dist = np.dot(points_v, plane_model_unit_v)
+        proj_dist = proj_dist[...,np.newaxis]
+        pts_npy = pts_npy - proj_dist * plane_model_unit_v
+
+        # rotate plane to align with x axis
+        base = np.eye(3)
+        base[:,0] = plane_model_unit_v
+        Q,R = np.linalg.qr(base)
+
+        pts_npy = (Q.T @ pts_npy.T).T
+
+        # Centering
+        mean = np.mean(pts_npy, axis=0)
+        pts_npy -= mean
+
+        # 2d polynomial fit
+        z = np.polyfit(pts_npy[:,1],pts_npy[:,2],3)
+
+        state_pts = np.zeros((self.state_dim,2))
+
+        # start farther away and come closer
+        x = np.linspace(np.max(pts_npy[:,1]),np.min(pts_npy[:,1]),N)
+        p = np.poly1d(z)
+        y = p(x)
+
+        state_pts[:,0] = x
+        state_pts[:,1] = y
+
+        # Compute the state_vectors between consecutive points
+        state_vectors = np.diff(state_pts, axis=0)
+        state_angles = np.zeros(state_vectors.shape[0])
+
+        for i in range(1, state_vectors.shape[0]):
+            # Compute the angles between consecutive vectors
+            v1 = state_vectors[i]
+            v2 = state_vectors[i-1]
+            v1_u = v1 / np.linalg.norm(v1)
+            v2_u = v2 / np.linalg.norm(v2)
+            state_angles[i] = np.arccos(np.clip(np.dot(v1_u, v2_u), -1.0, 1.0))
+         # TODO: the state seems to fluctate by 0.02 between calls for the same
+         # pointcloud
+        return state_angles
+
+
+def visualize_pcd(points):
+    frame = o3d.geometry.TriangleMesh.create_coordinate_frame(
+        size=100,  # specify the size of coordinate frame
+    )
+    o3d.visualization.draw_geometries([pcd,frame])
+
+def visualize_line(pcd, line_points_pcd):
     # Add points to the line set
-    line_set.points = o3d.utility.Vector3dVector(line_points)
+    pcd.paint_uniform_color([1, 0, 0])  # Paint pc red
+    line_points_pcd.paint_uniform_color([0, 1, 0])  # Paint state red
 
-    # Add lines using indices
-    lines = [[0, i] for i in range(1, len(line_points))]
-    line_set.lines = o3d.utility.Vector2iVector(lines)
-
+    frame = o3d.geometry.TriangleMesh.create_coordinate_frame(
+        size=100,  # specify the size of coordinate frame
+    )
     # Visualize the points and line
-    o3d.visualization.draw_geometries([pcd, line_set])
+    o3d.visualization.draw_geometries([line_points_pcd,frame])
 
-def preprocess_point_cloud(pcd, distance_threshold):
+def preprocess_pcd(pcd, distance_threshold):
     # Fit a plane to the point cloud using RANSAC
     plane_model, inliers = pcd.segment_plane(distance_threshold=distance_threshold,
                                              ransac_n=3,
@@ -45,89 +113,56 @@ def preprocess_point_cloud(pcd, distance_threshold):
     # Extract inliers and outliers
     inlier_cloud = pcd.select_by_index(inliers)
     outlier_cloud = pcd.select_by_index(inliers, invert=True)
+    o3d.visualization.draw_geometries([inlier_cloud])
+    visualize_pcd(inlier_cloud)
 
-    return inlier_cloud, outlier_cloud
+    cloud_npy = np.asarray(inlier_cloud.points)
 
-def pca(pts):
-    pts = pts.reshape(-1, 2).astype(np.float64)
-    mv = np.mean(pts, 0).reshape(2, 1)
-    pts -= mv.T
-    w, v = np.linalg.eig(np.dot(pts.T, pts))
-    w_max = np.max(w)
-    w_min = np.min(w)
-    col = np.where(w == w_max)[0]
-    if len(col) > 1:
-        col = col[-1]
-    V_max = v[:, col]
+    # Proj all points to plane_model
+    plane_model_unit_v = plane_model[:3] / np.linalg.norm(plane_model)
+    plane_pt = np.zeros(3)
+    plane_pt[2] = -plane_model[3] / plane_model[2]
+    points_v = cloud_npy - plane_pt
+    proj_dist = np.dot(points_v, plane_model_unit_v)
+    proj_dist = proj_dist[...,np.newaxis]
+    cloud_npy = cloud_npy - proj_dist * plane_model_unit_v
 
-    if V_max[0] > 0 and V_max[1] > 0:
-        V_max *= -1
+    # rotate plane to align with x axis
+    base = np.eye(3)
+    base[:,0] = plane_model_unit_v
+    Q,R = np.linalg.qr(base)
 
-    col_min = np.where(w == w_min)[0]
-    if len(col_min) > 1:
-        col_min = col_min[-1]
-    V_min = v[:, col_min]
+    cloud_npy = (Q.T @ cloud_npy.T).T
 
-    return V_max, V_min, w_max, w_min, mv
+    mean = np.mean(cloud_npy, axis=0)
+    cloud_npy -= mean  # centering
 
-def moving_least_sq(mst: Dict[Tuple,float], h_dist):
-    def collect(P, A):
-        A.add(P)
-        for (Pi_idx, Pj_idx), dist in mst.items():
-            if np.abs(dist) < h_dist:
-                return collect(Pj_idx,A)
-    Pstar = 0
-    A = set()
-    collect(Pstar, A)
+    z = np.polyfit(pts_npy[:,1],pts_npy[:,2],3)
 
-    return np.array(A)
+    state_pts = np.zeros((N,2))
+    x = np.linspace(np.min(pts_npy[:,1]),np.max(pts_npy[:,1]),N)
+    p = np.poly1d(z)
+    y = p(x)
 
+    state_pts[:,1] = x
+    state_pts[:,2] = y
 
-def get_state(pcd: o3d.geometry.PointCloud,  N):
-    # find bbox
-
-    bbox = pcd.get_axis_aligned_bounding_box()
-    print(bbox)
-
-    points = pcd.points
-    mean = np.mean(points, axis=0)
-    points -= mean  # centering
-    print(points)
-
-    # Computing Delaunay
-    tri = Delaunay(points)
-
-    # Building the edges-distance map:
-    edges_dist_map = {}
-    for tr in tri.simplices:
-        for i in range(3):
-            edge_idx0 = tr[i]
-            edge_idx1 = tr[(i+1)%3]
-            if (edge_idx1, edge_idx0) in edges_dist_map:
-                continue  # already visited this edge from other side
-            p0 = points[edge_idx0]
-            p1 = points[edge_idx1]
-            dist = np.linalg.norm(p1 - p0)
-            edges_dist_map[(edge_idx0, edge_idx1)] = dist
-    line_pts = moving_least_sq(edges_dist_map, 1)
-    print(line_pts)
+    state_pts_pcd.points = o3d.utility.Vector3dVector(state_pts)
+    inlier_cloud.points = o3d.utility.Vector3dVector(cloud_npy)
+    return inlier_cloud
 
 
-    return points[line_pts,:]
 
 def get_pcd():
-    data = Path('./data/dataset_06-29-2023_18-32-54/pcd/120.ply')
-
+    data = Path('../../mount/data/dataset_06-29-2023_18-32-54/pcd/50.ply')
+    data = Path('../../cropped.ply')
     pcd = o3d.io.read_point_cloud(str(data.absolute()))  # replace with your point cloud file
     return pcd
 
 if __name__ == "__main__":
     # Load your point cloud
     pcd = get_pcd()
-
-    # Preprocess the point cloud
-    inlier_cloud, outlier_cloud = preprocess_point_cloud(pcd, distance_threshold=5)
-    # Define the number of points
-    N = 100
-    line_pts = get_state(inlier_cloud, N)
-    visualize_line(inlier_cloud, line_points)
+    N = 50
+    F = PlyToState(N)
+    label = F(pcd)
+    print(label)

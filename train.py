@@ -20,30 +20,31 @@ from torch.utils.data import random_split
 
 from data import ProprioDataset
 from model import ProprioNet
+from util import PlyToState
 
 
 class Trainer:
     def __init__(self, cfg):
         torch.manual_seed(cfg["seed"])
-        cfg_data = cfg["dataset"]
+        cfg_data = cfg["data"]
         img_tfs = Compose(
             [
-                ToTensor(),
-                Lambda(lambda x: x[:1, :, :]),
+                ToTensor()
             ]
         )
 
         label_tfs = Compose(
             [
-
+               PlyToState(cfg_data['state_dim'])
             ]
         )
 
         data_dir = Path(cfg_data['data_dir'])
 
         self.dataset = ProprioDataset(
-            data_dir / 'datasets' / cfg_data["dataset_name"]
+            data_dir / cfg_data["dataset_name"]
         )
+
         train_dataset, test_dataset = random_split(
             self.dataset,
             (round(0.8 * len(self.dataset)), round(0.2 * len(self.dataset))),

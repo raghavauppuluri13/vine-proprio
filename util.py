@@ -1,4 +1,5 @@
 from torch import nn
+import torch
 import open3d as o3d
 import cv2
 import numpy as np
@@ -45,36 +46,86 @@ def rotate_image(image, angle):
 class RandomSaturation(object):
     scale: float = 1 # (1.0-3.0)
 
-    def __init__(self, scale)
-    self.scale = scale
+    def __init__(self, scale):
+        self.scale = scale
 
     def __call__(self,sample: torch.Tensor):
         im = sample.numpy()
         # Convert the image to HSV
-        hsv_img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        hsv_img = cv2.cvtColor(sample, cv2.COLOR_BGR2HSV)
 
         # Increase the saturation
-        hsv_img[..., 1] = np.clip(hsv_img[..., 1] * scale, 0, 255)
+        hsv_img[..., 1] = np.clip(hsv_img[..., 1] * self.scale, 0, 255)
 
         # Convert back to BGR
         adjusted_img = cv2.cvtColor(hsv_img, cv2.COLOR_HSV2BGR)
         return torch.from_numpy(adjusted_img)
 
 class PlyToState(object):
+    ransac_n: int = 3
+    distance_threshold: int = 5
+    ransac_iter: int = 1000
     def __init__(self, state_dim):
         self.state_dim = state_dim
 
-    def __call__(self,sample: torch.Tensor):
-        im = sample.numpy()
-        # Convert the image to HSV
-        hsv_img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    def __call__(self,sample: o3d.geometry.PointCloud):
 
-        # Increase the saturation
-        hsv_img[..., 1] = np.clip(hsv_img[..., 1] * scale, 0, 255)
+        # Fit a plane to the point cloud using RANSAC
+        plane_model, inliers = sample.segment_plane(distance_threshold=self.distance_threshold,
+                                                ransac_n=self.ransac_n,
+                                                num_iterations=self.ransac_iter)
 
-        # Convert back to BGR
-        adjusted_img = cv2.cvtColor(hsv_img, cv2.COLOR_HSV2BGR)
-        return torch.from_numpy(adjusted_img)
+        # Extract inliers and outliers
+        inlier_cloud = sample.select_by_index(inliers)
+        outlier_cloud = sample.select_by_index(inliers, invert=True)
+
+        # Proj all points to plane
+        pts_npy = np.asarray(inlier_cloud.points)
+
+        plane_model_unit_v = plane_model[:3] / np.linalg.norm(plane_model)
+        plane_pt = np.zeros(3)
+        plane_pt[2] = -plane_model[3] / plane_model[2]
+        points_v = pts_npy - plane_pt
+        proj_dist = np.dot(points_v, plane_model_unit_v)
+        proj_dist = proj_dist[...,np.newaxis]
+        pts_npy = pts_npy - proj_dist * plane_model_unit_v
+
+        # rotate plane to align with x axis
+        base = np.eye(3)
+        base[:,0] = plane_model_unit_v
+        Q,R = np.linalg.qr(base)
+
+        pts_npy = (Q.T @ pts_npy.T).T
+
+        # Centering
+        mean = np.mean(pts_npy, axis=0)
+        pts_npy -= mean
+
+        # 2d polynomial fit
+        z = np.polyfit(pts_npy[:,1],pts_npy[:,2],3)
+
+        state_pts = np.zeros((self.state_dim,2))
+
+        # start farther away and come closer
+        x = np.linspace(np.max(pts_npy[:,1]),np.min(pts_npy[:,1]),N)
+        p = np.poly1d(z)
+        y = p(x)
+
+        state_pts[:,0] = x
+        state_pts[:,1] = y
+
+        # Compute the state_vectors between consecutive points
+        state_vectors = np.diff(state_pts, axis=0)
+        state_angles = np.zeros(state_vectors.shape[0])
+
+        for i in range(1, state_vectors.shape[0]):
+            # Compute the angles between consecutive vectors
+            v1 = state_vectors[i]
+            v2 = state_vectors[i-1]
+            v1_u = v1 / np.linalg.norm(v1)
+            v2_u = v2 / np.linalg.norm(v2)
+            state_angles[i] = np.arccos(np.clip(np.dot(v1_u, v2_u), -1.0, 1.0))
+        return torch.from_numpy(state_angles)
 
 class RandomContrast(object):
     alpha: float = 1.0 # (1.0-3.0)
