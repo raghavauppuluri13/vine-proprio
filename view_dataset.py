@@ -24,10 +24,11 @@ if __name__ == "__main__":
         params = yaml.safe_load(f)
 
     dataset_folder = Path("{}/{}".format(params['data']['data_dir'],args['dataset_name']))
-    pcd_folder = dataset_folder / 'pcd'
-    img_folder = dataset_folder / 'img'
+    kinect_pcd_folder = dataset_folder / 'kinect_pcd'
+    kinect_rgb_folder = dataset_folder / 'kinect_rgb'
+    vine_rgb_folder = dataset_folder / 'vine_rgb'
 
-    dataset_size = len(list(img_folder.glob('*')))
+    dataset_size = len(list(vine_rgb_folder.glob('*')))
 
     pcd = o3d.geometry.PointCloud()
 
@@ -40,13 +41,13 @@ if __name__ == "__main__":
 
     try:
         for i in range(dataset_size):
-            img = cv2.imread(str(img_folder / f'{i}.jpeg'))
-            pcd = o3d.io.read_point_cloud(str(pcd_folder / f'{i}.ply'))
+            kinect_rgb = cv2.imread(str(kinect_rgb_folder / f'{i}.jpeg'))
+            vine_rgb = cv2.imread(str(vine_rgb_folder / f'{i}.jpeg'))
+            pcd = o3d.io.read_point_cloud(str(kinect_pcd_folder / f'{i}.ply'))
             pcds.append(pcd)
             state = to_state(pcd)
-            print(state)
             print("sample",i)
-            v.step(state, img)
+            v.step(state, vine_rgb, kinect_rgb)
             #o3d.visualization.draw_geometries(pcds)
     except KeyboardInterrupt:
         pass

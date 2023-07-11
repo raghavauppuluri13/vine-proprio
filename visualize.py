@@ -50,9 +50,9 @@ class Visualizer:
         self.frames = []
         self.frame_i = 0
 
-    def step(self, state, frame):
+    def step(self, state, frame, kinect_frame):
 
-        self.frames.append(frame)
+        self.frames.append((frame, kinect_frame))
         self.frame_i += 1
 
         new_points = update_points(self.init_points, state)
@@ -71,11 +71,11 @@ class Visualizer:
         Args:
             path (str, optional): _description_. Defaults to 'dataset_render.gif'.
         """
-        frames = np.array(self.frames)
-        fig,axes = plt.subplots(2,1,
+        frames = self.frames
+        fig,axes = plt.subplots(3,1,
             figsize=(
-                frames[0].shape[1] / self.render_factor,
-                frames[0].shape[0] / self.render_factor,
+                frames[0][0].shape[1] / self.render_factor,
+                frames[0][0].shape[0] / self.render_factor,
             ),
             dpi=self.dpi,
         )
@@ -95,15 +95,19 @@ class Visualizer:
         # Add grid
         axes[1].grid(True)
         axes[0].grid(False)
+        axes[2].grid(False)
         axes[0].axis('off')
+        axes[2].axis('off')
 
-        patch = axes[0].imshow(frames[0])
+        vine_cam_patch = axes[0].imshow(frames[0][0])
+        kinect_cam_patch = axes[2].imshow(frames[0][1])
         plot = axes[1].plot(self.point_set[0][:,0], self.point_set[0][:,1], color='blue')[0]
         plot_scatter = axes[1].plot(self.point_set[0][:,0], self.point_set[0][:,1], color='red',marker='o')[0]
         plt.draw()
 
         def animate(i):
-            patch.set_data(frames[i])
+            vine_cam_patch.set_data(frames[i][0])
+            kinect_cam_patch.set_data(frames[i][1])
             plot.set_data(self.point_set[i][:,0], self.point_set[i][:,1])
             plot_scatter.set_data(self.point_set[i][:,0], self.point_set[i][:,1])
 

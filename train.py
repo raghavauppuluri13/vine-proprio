@@ -48,7 +48,6 @@ class Trainer:
             data_dir / cfg_data["dataset_name"], img_tfs, label_tfs
         )
 
-
         train_dataset, test_dataset = random_split(
             self.dataset,
             (round(0.8 * len(self.dataset)), round(0.2 * len(self.dataset))),
@@ -141,7 +140,7 @@ class Trainer:
             logging.info(f"Epoch {self.step+1}\n-------------------------------")
             self.train()
             self.test()
-            if self.step % 10:
+            if self.step % 1000:
                 self.checkpoint()
             self.step+=1
 

@@ -131,7 +131,9 @@ class PlyToState(object):
         pts_npy = np.asarray(sample.points)
 
         # 2d polynomial fit
-        z = np.polyfit(pts_npy[:,0],pts_npy[:,1],3)
+
+        #TODO: invert negative in collect_dataset function instead of here
+        z = np.polyfit(pts_npy[:,0],-pts_npy[:,1],3)
 
         state_points_dim= self.state_dim + 1
         state_pts = np.zeros((state_points_dim,3))

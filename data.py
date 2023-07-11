@@ -9,14 +9,16 @@ class ProprioDataset(Dataset):
         self.dataset_pth = dataset_pth
         self.img_tfs = img_tfs
         self.label_tfs = label_tfs
+        self.rgb_path = self.dataset_pth / 'vine_rgb'
+        self.pcd_path = self.dataset_pth / 'kinect_pcd'
 
     def __len__(self):
-        return len(list((self.dataset_pth / 'img').glob('*')))
+        return len(list(self.rgb_path.glob('*')))
 
     def __getitem__(self, index):
         # Load image using PIL
-        img = Image.open(self.dataset_pth / 'img' / f'{index}.jpeg')
-        pcd = o3d.io.read_point_cloud(str(self.dataset_pth / 'pcd' / f'{index}.ply'))
+        img = Image.open(self.rgb_path / f'{index}.jpeg')
+        pcd = o3d.io.read_point_cloud(str(self.pcd_path / f'{index}.ply'))
 
         # Apply transformations if provided
         if self.img_tfs:

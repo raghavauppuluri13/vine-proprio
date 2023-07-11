@@ -70,6 +70,8 @@ class KinectCapture:
 
     def read(self):
         capture = self.device.get_capture(-1)
+
+        kinect_rgb = capture.color.data
         # Get Point Cloud
         point_cloud = self.transformation.depth_image_to_point_cloud(capture.depth, k4a.ECalibrationType.DEPTH)
 
@@ -78,7 +80,7 @@ class KinectCapture:
         xyz_data = point_cloud.data.reshape(height * width, channels)
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(xyz_data)
-        return pcd
+        return (pcd,kinect_rgb)
 
 
 def preprocess(pcd):
@@ -176,17 +178,17 @@ def preprocess(pcd):
 
     return pcd
 
-def read_pcd(pcd_buffer, capture, stop_event):
+def read_kinect(kinect_buffer, capture, stop_event):
     while not stop_event.is_set():
         pcd = capture.read()
-        pcd_buffer.put(pcd)
+        kinect_buffer.put(pcd)
         time.sleep(0.01)
 
-def read_rgb(rgb_buffer, capture, stop_event):
+def read_rgb(vine_cam_buffer, capture, stop_event):
     while not stop_event.is_set():
         ret, rgb = capture.read()
         if ret:
-            rgb_buffer.put(rgb)
+            vine_cam_buffer.put(rgb)
         time.sleep(0.01)
 
 if __name__ == '__main__':
@@ -206,41 +208,43 @@ if __name__ == '__main__':
     vcap = cv2.VideoCapture("http://192.168.0.100:8000/stream.mjpg")
     kinect_capture = KinectCapture()
 
-    pcd_buffer = Buffer(10)
-    rgb_buffer = Buffer(10)
+    kinect_buffer = Buffer(10)
+    vine_cam_buffer = Buffer(10)
     stop_event = threading.Event()
 
     # Start the threads for reading depth and RGB images
-    pcd_thread = threading.Thread(target=read_pcd, args=(pcd_buffer, kinect_capture, stop_event))
-    rgb_thread = threading.Thread(target=read_rgb, args=(rgb_buffer, vcap, stop_event))
+    kinect_thread = threading.Thread(target=read_kinect, args=(kinect_buffer, kinect_capture, stop_event))
+    vine_cam_thread = threading.Thread(target=read_rgb, args=(vine_cam_buffer, vcap, stop_event))
 
-    pcd_thread.start()
-    rgb_thread.start()
+    kinect_thread.start()
+    vine_cam_thread.start()
 
     if args['scene_collect_only']:
-        pcd = pcd_buffer.get()
+        pcd = kinect_buffer.get()
         o3d.io.write_point_cloud(f"./scene.ply", pcd)
     else:
         # Create dataset folders
         dataset_folder = datetime.datetime.now().strftime("{}/dataset_%m-%d-%Y_%H-%M-%S".format(params['data']['data_dir']))
         os.mkdir(dataset_folder)
 
-        pcd_folder = dataset_folder + '/pcd'
-        img_folder = dataset_folder + '/img'
+        kinect_rgb_folder = dataset_folder + '/kinect_rgb'
+        pcd_folder = dataset_folder + '/kinect_pcd'
+        vine_rgb_folder = dataset_folder + '/vine_rgb'
+        os.mkdir(kinect_rgb_folder)
         os.mkdir(pcd_folder)
-        os.mkdir(img_folder)
+        os.mkdir(vine_rgb_folder)
 
         i = 0
 
         try:
             while(True):
-                rgb = rgb_buffer.get()
-                pcd = pcd_buffer.get()
-                pcd = preprocess(pcd)
+                vine_rgb = vine_cam_buffer.get()
+                kinect_pcd, kinect_rgb = kinect_buffer.get()
+                kinect_pcd = preprocess(kinect_pcd)
 
-                # Get Point Cloud
-                o3d.io.write_point_cloud(f"{pcd_folder}/{i}.ply", pcd)
-                cv2.imwrite(f'{img_folder}/{i}.jpeg',rgb)
+                o3d.io.write_point_cloud(f"{pcd_folder}/{i}.ply", kinect_pcd)
+                cv2.imwrite(f'{vine_rgb_folder}/{i}.jpeg',vine_rgb)
+                cv2.imwrite(f'{kinect_rgb_folder}/{i}.jpeg',kinect_rgb)
                 print(f'sample {i} saved')
                 time.sleep(0.03)
                 i += 1
@@ -249,8 +253,8 @@ if __name__ == '__main__':
         print(f'dataset {dataset_folder} finished!')
 
     stop_event.set()
-    pcd_thread.join()
-    rgb_thread.join()
+    kinect_thread.join()
+    vine_cam_thread.join()
 
     # Stop Cameras
     kinect_capture.release()
