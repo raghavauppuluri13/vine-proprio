@@ -4,6 +4,92 @@ import open3d as o3d
 import cv2
 import numpy as np
 
+def crop_pcd(pcd, R, t, scale, bbox_params, visualize=False):
+    # pretranslate
+    T = np.eye(4)
+    T[:3,3] = t
+    pcd.transform(T)
+
+    # rotate
+    T = np.eye(4)
+    T[:3,:3] = R
+    pcd.transform(T)
+
+    # bbox
+    corners = get_centered_bbox(*bbox_params)
+    corners *= scale
+    aabb = o3d.geometry.AxisAlignedBoundingBox.create_from_points(o3d.utility.Vector3dVector(corners))
+
+    # Crop the point cloud
+    cropped_pcd = pcd.crop(aabb)
+    if visualize:
+        visualize_pcds([cropped_pcd],frames=list(corners))
+
+    return cropped_pcd
+
+def get_centered_bbox(delta_y, x_pos, x_neg, z_pos, z_neg):
+    x_pts = [[x_pos,0,0], [x_neg,0,0]]
+    y_pts = [[0,delta_y,0], [0,-delta_y,0]]
+    z_pts = [[0,0,z_pos], [0,0,z_neg]]
+
+    pts = []
+    for x in x_pts:
+        for y in y_pts:
+            for z in z_pts:
+                pt = np.array([x,y,z]).sum(axis=0)
+                pts.append(pt)
+    pts = np.array(pts)
+    return pts
+
+def unit(v):
+    return v / np.linalg.norm(v)
+
+def visualize_pcds(pcds,frames=[]):
+
+    # Add points to the line set
+    for p in pcds:
+        p.paint_uniform_color(list(np.random.uniform(0,1,3)))
+
+    frame = o3d.geometry.TriangleMesh.create_coordinate_frame(
+        size=100,  # specify the size of coordinate frame
+    )
+    pcds.append(frame)
+
+    for frame in frames:
+        pcds.append(
+            o3d.geometry.TriangleMesh.create_coordinate_frame(
+                size=100,  # specify the size of coordinate frame
+                origin=list(frame)
+            )
+        )
+
+    # Get the camera parameters of the visualization window
+    vis = o3d.visualization.Visualizer()
+    vis.create_window()
+
+    for pcd in pcds:
+        vis.add_geometry(pcd)
+
+    ctr = vis.get_view_control().convert_to_pinhole_camera_parameters()
+
+    # Set the center of the viewport to the origin
+    ctr.extrinsic = np.eye(4)
+    vis.get_view_control().convert_from_pinhole_camera_parameters(ctr)
+
+    # Update the visualization window
+    vis.run()
+    vis.destroy_window()
+
+def rotate(v, angle):
+    return np.linalg.norm(v) * np.array([np.cos(angle),np.sin(angle)])
+
+def update_points(init_points, state: np.ndarray):
+    curr_points = init_points.copy()
+    for i in range(1, init_points.shape[0]):
+        # Compute the angles between consecutive vectors
+        v = curr_points[i] - init_points[i-1]
+        curr_points[i] = curr_points[i-1] + rotate(v, state[i-1])
+    return curr_points
 
 def init_weights(m):
     if isinstance(m, nn.Linear):
@@ -35,71 +121,44 @@ class RandomSaturation(object):
 
 class PlyToState(object):
     ransac_n: int = 3
-    distance_threshold: int = 5
+    distance_threshold: int = 10
     ransac_iter: int = 1000
     def __init__(self, state_dim):
         self.state_dim = state_dim
 
     def __call__(self,sample: o3d.geometry.PointCloud):
 
-        # Fit a plane to the point cloud using RANSAC
-        plane_model, inliers = sample.segment_plane(distance_threshold=self.distance_threshold,
-                                                    ransac_n=self.ransac_n,
-                                                    num_iterations=self.ransac_iter)
-
-        # Extract inliers and outliers
-        inlier_cloud = sample.select_by_index(inliers)
-        outlier_cloud = sample.select_by_index(inliers, invert=True)
-
-        # Proj all points to plane
-        pts_npy = np.asarray(inlier_cloud.points)
-
-        plane_model_unit_v = plane_model[:3] / np.linalg.norm(plane_model)
-        plane_pt = np.zeros(3)
-        plane_pt[2] = -plane_model[3] / plane_model[2]
-        points_v = pts_npy - plane_pt
-        proj_dist = np.dot(points_v, plane_model_unit_v)
-        proj_dist = proj_dist[...,np.newaxis]
-        pts_npy = pts_npy - proj_dist * plane_model_unit_v
-
-        # rotate plane to align with x axis
-        base = np.eye(3)
-        base[:,0] = plane_model_unit_v
-        Q,R = np.linalg.qr(base)
-
-        pts_npy = (Q.T @ pts_npy.T).T
-
-        # Centering
-        mean = np.mean(pts_npy, axis=0)
-        pts_npy -= mean
+        pts_npy = np.asarray(sample.points)
 
         # 2d polynomial fit
-        z = np.polyfit(pts_npy[:,1],pts_npy[:,2],3)
+        z = np.polyfit(pts_npy[:,0],pts_npy[:,1],3)
 
         state_points_dim= self.state_dim + 1
-        state_pts = np.zeros((state_points_dim,2))
+        state_pts = np.zeros((state_points_dim,3))
 
-        # start farther away and come closer
-        x = np.linspace(np.max(pts_npy[:,1]), np.min(pts_npy[:,1]), state_points_dim)
+        x = np.linspace(0, np.max(pts_npy[:,0]), state_points_dim)
         p = np.poly1d(z)
         y = p(x)
 
         state_pts[:,0] = x
         state_pts[:,1] = y
 
+        line_viz_pcd = o3d.geometry.PointCloud()
+        line_viz_pcd.points = o3d.utility.Vector3dVector(state_pts)
+
+        #visualize_pcds([line_viz_pcd,sample])
+
         # Compute the state_vectors between consecutive points
+        state_pts = state_pts[:,:2]
         state_vectors = np.diff(state_pts, axis=0)
         state_angles = np.zeros(state_vectors.shape[0])
 
-        for i in range(1, state_vectors.shape[0]):
+        for i in range(state_vectors.shape[0]):
             # Compute the angles between consecutive vectors
-            v1 = state_vectors[i]
-            v2 = state_vectors[i-1]
-            v1_u = v1 / np.linalg.norm(v1)
-            v2_u = v2 / np.linalg.norm(v2)
-            state_angles[i] = np.arccos(np.clip(np.dot(v1_u, v2_u), -1.0, 1.0))
-
-        return torch.from_numpy(state_angles)
+            v = state_vectors[i]
+            v_u = v / np.linalg.norm(v)
+            state_angles[i] = np.arctan(v_u[1]/v_u[0])
+        return state_angles
 
 class RandomContrast(object):
     alpha: float = 1.0 # (1.0-3.0)

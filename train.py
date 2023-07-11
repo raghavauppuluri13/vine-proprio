@@ -13,7 +13,8 @@ from torch import optim
 from torch.utils.data import DataLoader
 from torchvision.transforms import ToTensor, Compose, Lambda
 
-from tensorboard_logger import configure, log_value
+import tensorboard
+from torch.utils.tensorboard import SummaryWriter
 
 # from torchvision.datasets import MNIST
 from torch.utils.data import random_split
@@ -21,6 +22,7 @@ from torch.utils.data import random_split
 from data import ProprioDataset
 from model import ProprioNet
 from util import PlyToState
+
 
 
 class Trainer:
@@ -35,7 +37,8 @@ class Trainer:
 
         label_tfs = Compose(
             [
-               PlyToState(cfg_data['state_dim'])
+               PlyToState(cfg_data['state_dim']),
+               Lambda(lambda x: torch.from_numpy(x))
             ]
         )
 
@@ -45,11 +48,10 @@ class Trainer:
             data_dir / cfg_data["dataset_name"], img_tfs, label_tfs
         )
 
-        sanity_dataset = torch.utils.data.Subset(self.dataset,list(range(40)))
 
         train_dataset, test_dataset = random_split(
-            sanity_dataset,
-            (round(0.8 * len(sanity_dataset)), round(0.2 * len(sanity_dataset))),
+            self.dataset,
+            (round(0.8 * len(self.dataset)), round(0.2 * len(self.dataset))),
         )
 
 
@@ -89,8 +91,10 @@ class Trainer:
                 logging.StreamHandler(sys.stdout),
             ],
         )
-        configure("runs/",log_folder)
+        self.writer = SummaryWriter()
         self.chpt = 0
+
+        self.step = 0
 
     def train(self):
         size = len(self.trainloader.dataset)
@@ -112,7 +116,7 @@ class Trainer:
             if batch % 2 == 0:
                 loss, current = loss.item(), batch * len(inputs)
                 logging.info(f"loss: {loss:>7f}  [{current:>5d}/{size:>5d}]")
-                log_value('train_loss',loss)
+                self.writer.add_scalar('train_loss',loss,self.step)
 
     def test(self):
         num_batches = len(self.testloader)
@@ -128,19 +132,18 @@ class Trainer:
                 test_loss += self.criterion(outputs, labels).item()
         test_loss /= num_batches
         logging.info(f"Test Error: \n Avg loss: {test_loss:>8f} \n")
-        log_value('test_loss', test_loss)
+        self.writer.add_scalar('test_loss',test_loss,self.step)
 
     def train_test(self):
-        i = 0
         while(True):
-            if i >= self.epochs and self.epochs != -1: # -1 means keep training without stop
+            if self.step >= self.epochs and self.epochs != -1: # -1 means keep training without stop
                 break
-            logging.info(f"Epoch {i+1}\n-------------------------------")
+            logging.info(f"Epoch {self.step+1}\n-------------------------------")
             self.train()
             self.test()
-            if i % 10:
+            if self.step % 10:
                 self.checkpoint()
-            i+=1
+            self.step+=1
 
     def checkpoint(self, name=None):
         if name is None:
@@ -161,5 +164,8 @@ if __name__ == "__main__":
 
 
     trainer = Trainer(params)
-    trainer.train_test()
+    try:
+        trainer.train_test()
+    except KeyboardInterrupt:
+        print('exiting!')
     trainer.checkpoint("final")
