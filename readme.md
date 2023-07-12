@@ -1,6 +1,10 @@
 # vine-proprio
-
 Estimate the state of a vine robot from an internal view
+
+![vine-robot-setup](https://github.com/raghavauppuluri13/vine-proprio/assets/41026849/cdf8aa1e-53c0-4d9a-ad3a-12a831838bd0)
+
+![eval_close](https://github.com/raghavauppuluri13/vine-proprio/assets/41026849/e6edfdb9-36bf-498b-a285-a9fe18b6bb1e)
+
 
 ### Structure
 
