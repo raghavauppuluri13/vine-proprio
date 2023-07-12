@@ -187,3 +187,24 @@ class RandomGaussianNoise(object):
         gaussian_noise = np.random.normal(self.mean, sigma, img.shape)
         noisy_img = img + gaussian_noise
         return torch.from_numpy(noisy_img)
+
+def obj_center_crop(im, desired: tuple = None):
+    inds = np.argwhere(im != 0)
+    max_p = np.max(inds, axis=0)
+    min_p = np.min(inds, axis=0)
+    centered = im[min_p[0] : max_p[0], min_p[1] : max_p[1]]
+    if desired is not None:
+        delta_w = desired[1] - centered.shape[1]
+        delta_h = desired[0] - centered.shape[0]
+        top, bottom = max(delta_h // 2, 0), max(delta_h - (delta_h // 2), 0)
+        left, right = max(delta_w // 2, 0), max(delta_w - (delta_w // 2), 0)
+        color = [0, 0, 0]
+        centered = cv2.copyMakeBorder(
+            centered, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color
+        )
+    center = (centered.shape[0] / 2, centered.shape[1] / 2)
+    x = center[1] - desired[1] / 2
+    y = center[0] - desired[0] / 2
+
+    centered = centered[int(y) : int(y + desired[0]), int(x) : int(x + desired[1])]
+    return centered

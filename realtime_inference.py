@@ -23,12 +23,12 @@ if __name__ == '__main__':
         params = yaml.safe_load(f)
 
 
+
+    vcap = cv2.VideoCapture("http://192.168.0.100:8000/stream.mjpg")
     state_dim = params['data']['state_dim']
     input_dim = params['data']['image_size']
     compute_type = params['eval']['compute_type']
     model_path = params['eval']['model_path']
-
-    vcap = cv2.VideoCapture("http://192.168.0.100:8000/stream.mjpg")
     eval_ = EvalProprioNet(model_path=model_path,
                            state_dim=state_dim,
                            input_dim=input_dim,

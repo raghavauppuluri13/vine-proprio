@@ -50,13 +50,18 @@ class Visualizer:
         self.frames = []
         self.frame_i = 0
 
-    def step(self, state, frame, kinect_frame):
+    def step(self, state, frame, kinect_frame,pred_state=None):
 
         self.frames.append((frame, kinect_frame))
         self.frame_i += 1
 
+        if pred_state is None:
+            pred_state = np.zeros_like(state)
+
         new_points = update_points(self.init_points, state)
-        self.point_set.append(new_points)
+        pred_points = update_points(self.init_points, pred_state)
+
+        self.point_set.append((new_points,pred_points))
 
         if self.show:
             self.ax.plot(new_points[:,0], new_points[:,1], color='blue')
@@ -72,44 +77,63 @@ class Visualizer:
             path (str, optional): _description_. Defaults to 'dataset_render.gif'.
         """
         frames = self.frames
-        fig,axes = plt.subplots(3,1,
+        fig,axes = plt.subplots(1,2,
             figsize=(
                 frames[0][0].shape[1] / self.render_factor,
                 frames[0][0].shape[0] / self.render_factor,
             ),
             dpi=self.dpi,
         )
+        ax1 = plt.subplot2grid((2, 2), (1, 0), colspan=2)
+        ax2 = plt.subplot2grid((2, 2), (0, 0))
+        ax3 = plt.subplot2grid((2, 2), (0, 1))
 
         # Set x-axis label
-        axes[1].set_xlabel('X-position (m)')
+        ax1.set_xlabel('X-position (m)')
 
         # Set y-axis label
-        axes[1].set_ylabel('Y-position (m)')
+        ax1.set_ylabel('Y-position (m)')
 
         # Set x-axis limits
-        axes[1].set_xlim([0, self.L+1])
+        ax1.set_xlim([0, self.L+1])
 
         # Set y-axis limits
-        axes[1].set_ylim([-1, 1])
+        ax1.set_ylim([-1, 1])
 
+        # set titles
+        ax2.set_title("Vine Robot Embedded Camera Image")
+        ax1.set_title("Vine Robot State Estimate")
+        ax3.set_title("External Camera View")
+
+        ax1.legend()
         # Add grid
-        axes[1].grid(True)
-        axes[0].grid(False)
-        axes[2].grid(False)
-        axes[0].axis('off')
-        axes[2].axis('off')
 
-        vine_cam_patch = axes[0].imshow(frames[0][0])
-        kinect_cam_patch = axes[2].imshow(frames[0][1])
-        plot = axes[1].plot(self.point_set[0][:,0], self.point_set[0][:,1], color='blue')[0]
-        plot_scatter = axes[1].plot(self.point_set[0][:,0], self.point_set[0][:,1], color='red',marker='o')[0]
+        ax1.grid(True)
+        ax2.grid(False)
+        ax3.grid(False)
+        ax2.axis('off')
+        ax3.axis('off')
+
+
+        vine_cam_patch = ax2.imshow(frames[0][0])
+        kinect_cam_patch = ax3.imshow(frames[0][1])
+        plot = ax1.plot(self.point_set[0][0][:,0], self.point_set[0][0][:,1], color='red', label="Ground Truth")[0]
+        plot_scatter = ax1.plot(self.point_set[0][0][:,0], self.point_set[0][0][:,1], color='red',marker='o')[0]
+
+        pred_plot = ax1.plot(self.point_set[0][1][:,0], self.point_set[0][1][:,1], color='green', label="Predicted")[0]
+        pred_plot_scatter = ax1.plot(self.point_set[0][1][:,0], self.point_set[0][1][:,1], color='green',marker='o')[0]
+        ax1.legend()
+
         plt.draw()
 
         def animate(i):
             vine_cam_patch.set_data(frames[i][0])
             kinect_cam_patch.set_data(frames[i][1])
-            plot.set_data(self.point_set[i][:,0], self.point_set[i][:,1])
-            plot_scatter.set_data(self.point_set[i][:,0], self.point_set[i][:,1])
+            plot.set_data(self.point_set[i][0][:,0], self.point_set[i][0][:,1])
+            plot_scatter.set_data(self.point_set[i][0][:,0], self.point_set[i][0][:,1])
+
+            pred_plot.set_data(self.point_set[i][1][:,0], self.point_set[i][1][:,1])
+            pred_plot_scatter.set_data(self.point_set[i][1][:,0], self.point_set[i][1][:,1])
 
         anim = animation.FuncAnimation(
             fig, animate, frames=len(frames), interval=50

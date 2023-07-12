@@ -16,13 +16,11 @@ from torchvision.transforms import ToTensor, Compose, Lambda
 import tensorboard
 from torch.utils.tensorboard import SummaryWriter
 
-# from torchvision.datasets import MNIST
 from torch.utils.data import random_split
 
 from data import ProprioDataset
 from model import ProprioNet
 from util import PlyToState
-
 
 
 class Trainer:
@@ -44,9 +42,12 @@ class Trainer:
 
         data_dir = Path(cfg_data['data_dir'])
 
-        self.dataset = ProprioDataset(
-            data_dir / cfg_data["dataset_name"], img_tfs, label_tfs
-        )
+        datasets = []
+        for dataset_name in cfg_data['dataset_name']:
+            datasets.append(ProprioDataset(
+            data_dir / dataset_name, img_tfs, label_tfs
+        ))
+        self.dataset = torch.utils.data.ConcatDataset(datasets)
 
         train_dataset, test_dataset = random_split(
             self.dataset,
@@ -66,13 +67,10 @@ class Trainer:
         self.testloader = DataLoader(
             test_dataset, cfg_train["batch_size"], shuffle=True
         )
-        self.optimizer = optim.SGD(
-            self.model.parameters(), lr=cfg_train["lr"], momentum=0.9
+        self.optimizer = optim.Adam(
+            self.model.parameters()
         )
-        self.criterion = lambda x, label: torch.sum(
-                    torch.abs(x - label) +
-                    torch.pow(x - label,2)
-                )
+        self.criterion = nn.MSELoss()
 
         # logging
         log_folder = datetime.datetime.now().strftime("log_%m-%d-%Y_%H-%M-%S")
@@ -128,6 +126,7 @@ class Trainer:
                 inputs = inputs.to(self.device)
                 labels = labels.to(self.device)
                 outputs = self.model(inputs)
+                print(outputs[0])
                 test_loss += self.criterion(outputs, labels).item()
         test_loss /= num_batches
         logging.info(f"Test Error: \n Avg loss: {test_loss:>8f} \n")
@@ -140,8 +139,6 @@ class Trainer:
             logging.info(f"Epoch {self.step+1}\n-------------------------------")
             self.train()
             self.test()
-            if self.step % 1000:
-                self.checkpoint()
             self.step+=1
 
     def checkpoint(self, name=None):

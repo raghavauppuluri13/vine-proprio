@@ -4,6 +4,7 @@ import numpy as np
 import cv2
 import torch
 from model import ProprioNet
+from torchvision.transforms import ToTensor
 
 class EvalProprioNet:
     """
@@ -29,14 +30,33 @@ class EvalProprioNet:
         self._model.to(self._device)
         self._model.load_state_dict(torch.load(model_path))
         self._model.eval()
-        torch.no_grad()
+        self._to_tensor = ToTensor()
 
     def run(self, frame):
-        frame = torch.from_numpy(np.float32(frame)).to(self._device)
+        frame = self._to_tensor(frame).double().to(self._device)
         frame = torch.unsqueeze(frame, 0)
-        frame = torch.permute(frame,(0,3,1,2))
-        out: torch.Tensor = self._model(frame)
+        with torch.no_grad():
+            out: torch.Tensor = self._model(frame)
         out = torch.flatten(out)
         out = out.detach().cpu().numpy()
         assert out.shape[0] == self._state_dim, print(out.shape)
         return out
+
+class Evaluator:
+
+    def __init__(self):
+        self.ground_truth = []
+        self.predicted = []
+
+    def add_sample(self,ground_truth, predicted):
+        self.ground_truth.append(ground_truth)
+        self.predicted.append(predicted)
+
+    def get_rmse(self):
+        gt = np.array(self.ground_truth)
+        pred = np.array(self.predicted)
+
+        mse = np.mean((pred - gt)**2)
+        rmse = np.sqrt(mse)
+        return rmse
+

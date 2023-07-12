@@ -18,6 +18,7 @@ class ProprioDataset(Dataset):
     def __getitem__(self, index):
         # Load image using PIL
         img = Image.open(self.rgb_path / f'{index}.jpeg')
+
         pcd = o3d.io.read_point_cloud(str(self.pcd_path / f'{index}.ply'))
 
         # Apply transformations if provided
@@ -26,4 +27,4 @@ class ProprioDataset(Dataset):
         if self.label_tfs:
             label = self.label_tfs(pcd)
 
-        return img, label
+        return img.double(), label.double()

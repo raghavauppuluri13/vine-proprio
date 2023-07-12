@@ -1,8 +1,8 @@
 seed: 512
 data:
     data_dir: './data' 
-    dataset_name: 'dataset_07-10-2023_23-01-21'
-    state_dim: 36
+    dataset_name: ['dataset_07-10-2023_23-01-21','dataset_07-10-2023_23-02-13']
+    state_dim: 5
     image_size: [256,256]  
   
 train:
