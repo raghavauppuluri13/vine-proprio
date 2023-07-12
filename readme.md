@@ -1,5 +1,5 @@
 # vine-proprio
-Estimate the state of a vine robot from an internal view
+Estimate the proprioception of a vine robot from an internal camera view
 
 ![vine-robot-setup](https://github.com/raghavauppuluri13/vine-proprio/assets/41026849/cdf8aa1e-53c0-4d9a-ad3a-12a831838bd0)
 
